@@ -13,6 +13,8 @@ type PlayerStatus = {
   hasClaimed: boolean;
 };
 
+type HexString = `0x${string}`;
+
 const NUMBER_INDICES = [0, 1, 2] as const;
 
 export function GameApp() {
@@ -20,8 +22,8 @@ export function GameApp() {
   const { instance, isLoading: isInstanceLoading, error: instanceError } = useZamaInstance();
   const signer = useEthersSigner();
 
-  const [contractAddress, setContractAddress] = useState(CONTRACT_ADDRESS);
-  const [addressInput, setAddressInput] = useState(CONTRACT_ADDRESS);
+  const [contractAddress, setContractAddress] = useState<string>(CONTRACT_ADDRESS);
+  const [addressInput, setAddressInput] = useState<string>(CONTRACT_ADDRESS);
   const [joining, setJoining] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [decryptingNumbers, setDecryptingNumbers] = useState(false);
@@ -32,7 +34,7 @@ export function GameApp() {
   const hasValidContract =
     /^0x[a-fA-F0-9]{40}$/i.test(contractAddress) &&
     contractAddress !== '0x0000000000000000000000000000000000000000';
-  const contractAddressTyped = contractAddress as `0x${string}`;
+  const contractAddressTyped = contractAddress as HexString;
 
   const { data: statusData, refetch: refetchStatus } = useReadContract({
     address: contractAddressTyped,
@@ -50,11 +52,27 @@ export function GameApp() {
     }
 
     if (Array.isArray(statusData)) {
-      const [joined, hasClaimed] = statusData as [boolean, boolean];
+      const [joined, hasClaimed] = statusData as readonly [boolean, boolean];
       return { joined, hasClaimed };
     }
 
-    return statusData as PlayerStatus;
+    if (
+      typeof statusData === 'object' &&
+      statusData !== null &&
+      'joined' in statusData &&
+      'hasClaimed' in statusData
+    ) {
+      const { joined, hasClaimed } = statusData as {
+        joined: unknown;
+        hasClaimed: unknown;
+      };
+      return {
+        joined: Boolean(joined),
+        hasClaimed: Boolean(hasClaimed),
+      };
+    }
+
+    return { joined: false, hasClaimed: false };
   }, [statusData]);
 
   const { data: encryptedNumbers, refetch: refetchNumbers } = useReadContract({
@@ -88,7 +106,7 @@ export function GameApp() {
       return;
     }
 
-    setContractAddress(addressInput as `0x${string}`);
+    setContractAddress(addressInput);
     resetDecryptions();
   };
 
@@ -196,12 +214,15 @@ export function GameApp() {
         throw new Error('Signer unavailable');
       }
 
-      const numbersArray = Array.isArray(encryptedNumbers)
-        ? (encryptedNumbers as readonly string[])
-        : ([encryptedNumbers] as readonly string[]);
+      const rawHandles = Array.isArray(encryptedNumbers)
+        ? encryptedNumbers
+        : [encryptedNumbers];
+      const numbersArray = rawHandles.filter(
+        (handle): handle is HexString => typeof handle === 'string',
+      );
 
       const keypair = instance.generateKeypair();
-      const handleContractPairs = numbersArray.map((handle: string) => ({
+      const handleContractPairs = numbersArray.map((handle) => ({
         handle,
         contractAddress: contractAddressTyped,
       }));
@@ -236,7 +257,7 @@ export function GameApp() {
         durationDays,
       );
 
-      const clearValues = numbersArray.map((handle: string) => {
+      const clearValues = numbersArray.map((handle) => {
         const raw = decryptedResult[handle];
         return Number(raw ?? 0);
       });
